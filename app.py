@@ -285,46 +285,109 @@ with main_tab_hybrid:
         if not hybrid_input.strip():
             st.warning("프롬프트를 입력해 주세요.")
         else:
-            # ── 터미널 UI 구현 ──
-            st.markdown("### 🖥️ 실시간 통합 엔진 실행 로그")
-            terminal_placeholder = st.empty()
+            import time
+
+            # ── 파이프라인 다이어그램 + 터미널 ──
+            st.markdown("### 🔄 하이브리드 최적화 파이프라인")
+
+            PIPELINE_STEPS = [
+                ("📥 입력 수신", "프롬프트 텍스트 파싱"),
+                ("🔬 도메인 감지", "Fine-tuning 도메인 분류"),
+                ("🧬 학습 패턴 적용", "도메인 특화 압축"),
+                ("🔍 RAG 검색", "유사 사례 벡터 검색"),
+                ("📐 규칙 세팅", "RAG+FT 통합 의사결정"),
+                ("⚙️ 46개 규칙 정제", "기본 한국어 규칙 적용"),
+                ("✅ 최종 비교", "결과 확정 및 비용 산출"),
+            ]
+
+            def _render_pipeline(steps, active_idx, detail_text=""):
+                """파이프라인 다이어그램 HTML 생성"""
+                html = """<style>
+                .pipeline-box{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:10px 0}
+                .p-step{padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;
+                         border:2px solid #555;color:#aaa;background:#1e1e2e;transition:all .3s;min-width:120px;text-align:center}
+                .p-step.done{border-color:#22c55e;color:#22c55e;background:#0d2818}
+                .p-step.active{border-color:#facc15;color:#facc15;background:#2d2a10;
+                               animation:pulse 1s ease-in-out infinite alternate}
+                .p-step small{display:block;font-weight:400;font-size:11px;opacity:.7;margin-top:2px}
+                .p-arrow{color:#555;font-size:18px;font-weight:bold}
+                .p-arrow.done{color:#22c55e}
+                .p-detail{background:#161622;border:1px solid #333;border-radius:6px;padding:8px 12px;
+                          color:#aaa;font-size:12px;margin-top:6px;font-family:monospace}
+                @keyframes pulse{from{box-shadow:0 0 4px #facc1544}to{box-shadow:0 0 16px #facc1588}}
+                </style><div class="pipeline-box">"""
+                for i, (name, desc) in enumerate(steps):
+                    cls = "done" if i < active_idx else ("active" if i == active_idx else "")
+                    html += f'<div class="p-step {cls}">{name}<small>{desc}</small></div>'
+                    if i < len(steps) - 1:
+                        acls = "done" if i < active_idx else ""
+                        html += f'<span class="p-arrow {acls}">→</span>'
+                html += "</div>"
+                if detail_text:
+                    html += f'<div class="p-detail">▶ {detail_text}</div>'
+                return html
+
+            pipeline_ph = st.empty()
+            terminal_ph = st.empty()
             logs = []
 
             def _log(msg):
-                import time
                 logs.append(msg)
-                terminal_placeholder.code("\n".join(logs), language="bash")
-                time.sleep(0.35)
+                terminal_ph.code("\n".join(logs), language="bash")
 
-            # 실행 시작 로깅
+            # Step 0: 입력 수신
+            pipeline_ph.markdown(_render_pipeline(PIPELINE_STEPS, 0, f"프롬프트 수신 완료 ({len(hybrid_input)}자)"), unsafe_allow_html=True)
             _log("$ ./hybrid_optimizer --run-pipeline")
-            _log("[SYSTEM] 통합 최적화 엔진 초기화...")
-            _log(f"[INFO] 입력 프롬프트 수신 (길이: {len(hybrid_input)}자)")
+            _log(f"[INPUT] 프롬프트 수신 ({len(hybrid_input)}자)")
+            time.sleep(0.4)
 
-            with st.spinner("파이프라인 엔진 가동 중..."):
-                _log("[CORE] HybridOptimizer.optimize() 호출 중...")
+            # Step 1~: 엔진 실행
+            pipeline_ph.markdown(_render_pipeline(PIPELINE_STEPS, 1, "도메인 키워드 매칭 중..."), unsafe_allow_html=True)
+            _log("[FINE-TUNING] 도메인 키워드 스캐닝...")
+            time.sleep(0.3)
+
+            with st.spinner("하이브리드 엔진 실행 중..."):
                 h_result = hybrid_engine.optimize(hybrid_input, top_k=3)
 
-            # 세부 스텝 로깅
-            _log(f"[FINE-TUNING] 도메인 판별 완료: '{h_result.detected_domain}' (신뢰도 {h_result.domain_confidence:.0%})")
-            
+            # Step 1 완료 → Step 2
+            pipeline_ph.markdown(_render_pipeline(PIPELINE_STEPS, 2, f"도메인 '{h_result.detected_domain}' 감지 (신뢰도 {h_result.domain_confidence:.0%})"), unsafe_allow_html=True)
+            _log(f"[FINE-TUNING] 도메인: '{h_result.detected_domain}' (신뢰도 {h_result.domain_confidence:.0%})")
+            time.sleep(0.4)
+
             if h_result.learned_patterns_applied:
-                _log(f"[FINE-TUNING] 도메인 특화 학습 패턴 선제 적용 ({len(h_result.learned_patterns_applied)}개)...")
                 for pat in h_result.learned_patterns_applied:
                     _log(f"  ↳ {pat['rule']}")
+                pipeline_ph.markdown(_render_pipeline(PIPELINE_STEPS, 2, f"학습 패턴 {len(h_result.learned_patterns_applied)}개 적용 완료"), unsafe_allow_html=True)
             else:
-                _log("[FINE-TUNING] 적용 가능한 도메인 특화 패턴 없음.")
+                _log("[FINE-TUNING] 적용 가능한 도메인 패턴 없음")
+            time.sleep(0.3)
 
+            # Step 3: RAG
             similar_count = len(h_result.rag_advice.similar_cases)
-            _log(f"[RAG] 벡터 DB 검색 완료: 유사 사례 {similar_count}건 발견")
+            pipeline_ph.markdown(_render_pipeline(PIPELINE_STEPS, 3, f"TF-IDF 코사인 유사도 검색 → {similar_count}건 발견"), unsafe_allow_html=True)
+            _log(f"[RAG] 유사 사례 {similar_count}건 검색 완료")
             if similar_count > 0:
-                _log(f"[RAG] 과거 성공 사례 조언 추출 (예상 절감: {h_result.rag_advice.predicted_reduction_rate:.1%})")
+                _log(f"[RAG] 예상 절감률: {h_result.rag_advice.predicted_reduction_rate:.1%}")
+            time.sleep(0.3)
 
-            _log("[BASE-REFINER] 46개 한국어 기본 정제 규칙 가동...")
-            
-            _log(f"[RESULT] 압축 완료! (원본 {h_result.original_tokens}토큰 → 최종 {h_result.hybrid_tokens}토큰)")
-            _log(f"[RESULT] 총 토큰 절감률: {h_result.hybrid_reduction * 100:.1f}%")
-            _log("$ 프로세스 종료 (exit 0)")
+            # Step 4: 규칙 세팅
+            pipeline_ph.markdown(_render_pipeline(PIPELINE_STEPS, 4, "RAG + Fine-tuning 추천 통합 → 최적 규칙 세트 결정"), unsafe_allow_html=True)
+            _log("[DECIDE] RAG+FT 통합 의사결정 완료")
+            time.sleep(0.3)
+
+            # Step 5: 46개 규칙
+            pipeline_ph.markdown(_render_pipeline(PIPELINE_STEPS, 5, "46개 한국어 정제 규칙 순차 적용 중..."), unsafe_allow_html=True)
+            _log("[REFINER] 46개 규칙 적용 완료")
+            time.sleep(0.3)
+
+            # Step 6: 최종 비교
+            pipeline_ph.markdown(_render_pipeline(PIPELINE_STEPS, 6, f"원본 {h_result.original_tokens}→{h_result.hybrid_tokens} 토큰 (절감 {h_result.hybrid_reduction*100:.1f}%)"), unsafe_allow_html=True)
+            _log(f"[RESULT] {h_result.original_tokens}→{h_result.hybrid_tokens} 토큰 ({h_result.hybrid_reduction*100:.1f}% 절감)")
+            time.sleep(0.3)
+
+            # 전부 완료
+            pipeline_ph.markdown(_render_pipeline(PIPELINE_STEPS, 7, "파이프라인 완료 ✅"), unsafe_allow_html=True)
+            _log("$ exit 0")
 
             # ── 전략 설명 ──
             st.divider()
@@ -447,59 +510,101 @@ with main_tab_hybrid:
     st.divider()
     st.markdown("""
     ### 🧪 A/B 벤치마크: 규칙 기반 vs 하이브리드 비교 실험
-    30건 전체 데이터셋에 대해 **규칙 기반**과 **하이브리드** 방식을 동시에 실행하고,
+    60건 전체 데이터셋에 대해 **규칙 기반**과 **하이브리드** 방식을 동시에 실행하고,
     통계 검정(paired t-test, Wilcoxon, Cohen's d)으로 유의성을 검증합니다.
     """)
 
-    if st.button("🧪 A/B 벤치마크 실행 (30건 전수 비교)", type="primary", use_container_width=True, key="hybrid_bench"):
-        # UI Placeholder 설정
-        st.markdown("### ⚙️ 벤치마크 파이프라인 진행 상태")
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        st.markdown("#### 🖥️ 실시간 벤치마크 로그")
-        bench_terminal = st.empty()
+    if st.button("🧪 A/B 벤치마크 실행 (60건 전수 비교)", type="primary", use_container_width=True, key="hybrid_bench"):
+        import time
+
+        st.markdown("### 🔄 A/B 벤치마크 파이프라인")
+
+        BENCH_STEPS = [
+            ("🔧 엔진 초기화", "HybridOptimizer 워밍업"),
+            ("📊 데이터 처리", "60건 순차 A/B 비교"),
+            ("📐 통계 분석", "t-test, Wilcoxon, Cohen's d"),
+            ("📈 차트 생성", "논문용 비교 시각화"),
+            ("✅ 완료", "보고서 확정"),
+        ]
+
+        def _render_bench_pipeline(steps, active_idx, detail_text=""):
+            html = """<style>
+            .bp-box{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:10px 0}
+            .bp-step{padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;
+                     border:2px solid #555;color:#aaa;background:#1e1e2e;min-width:130px;text-align:center}
+            .bp-step.done{border-color:#22c55e;color:#22c55e;background:#0d2818}
+            .bp-step.active{border-color:#facc15;color:#facc15;background:#2d2a10;
+                           animation:bpulse 1s ease-in-out infinite alternate}
+            .bp-step small{display:block;font-weight:400;font-size:11px;opacity:.7;margin-top:2px}
+            .bp-arrow{color:#555;font-size:20px;font-weight:bold}
+            .bp-arrow.done{color:#22c55e}
+            .bp-detail{background:#161622;border:1px solid #333;border-radius:6px;padding:8px 12px;
+                      color:#aaa;font-size:12px;margin-top:6px;font-family:monospace}
+            @keyframes bpulse{from{box-shadow:0 0 4px #facc1544}to{box-shadow:0 0 16px #facc1588}}
+            </style><div class="bp-box">"""
+            for i, (name, desc) in enumerate(steps):
+                cls = "done" if i < active_idx else ("active" if i == active_idx else "")
+                html += f'<div class="bp-step {cls}">{name}<small>{desc}</small></div>'
+                if i < len(steps) - 1:
+                    acls = "done" if i < active_idx else ""
+                    html += f'<span class="bp-arrow {acls}">→</span>'
+            html += "</div>"
+            if detail_text:
+                html += f'<div class="bp-detail">▶ {detail_text}</div>'
+            return html
+
+        bench_pipeline_ph = st.empty()
+        bench_terminal_ph = st.empty()
         bench_logs = []
 
-        def bench_progress_callback(current, total, info):
-            import time
-            
-            # 진행률 업데이트 (Flowchart 텍스트 효과)
-            percent = int((current / total) * 100)
-            progress_bar.progress(current / total)
-            status_text.markdown(f"**진행률**: `{percent}%` ({current}/{total}) ⏳ 데이터 처리 중...")
+        def _bench_log(msg):
+            bench_logs.append(msg)
+            if len(bench_logs) > 18:
+                display = bench_logs[-18:]
+            else:
+                display = bench_logs
+            bench_terminal_ph.code("\n".join(display), language="bash")
 
-            # 터미널 로그 추가
+        # Step 0: 엔진 초기화
+        bench_pipeline_ph.markdown(_render_bench_pipeline(BENCH_STEPS, 0, "하이브리드 엔진 및 벤치마크 런너 초기화 중..."), unsafe_allow_html=True)
+        _bench_log("$ ./run_ab_benchmark --mode=hybrid --samples=30")
+        _bench_log("[SYSTEM] HybridBenchmarkRunner 초기화 중...")
+        time.sleep(0.4)
+
+        # Step 1: 데이터 처리 (30건 순차)
+        bench_pipeline_ph.markdown(_render_bench_pipeline(BENCH_STEPS, 1, "60건 프롬프트 A/B 비교 시작..."), unsafe_allow_html=True)
+        _bench_log("[ENGINE] 벤치마크 데이터 로드 완료. 처리 시작.")
+
+        def bench_progress_callback(current, total, info):
             cat = info['category']
             dom = info['domain']
             red = info['reduction'] * 100
-            
-            log_line = f"[{current:02d}/{total}] Domain: '{dom}' | Category: '{cat}' | Reduction: {red:.1f}%"
-            bench_logs.append(log_line)
-            
-            # 최근 10개 로그만 보여주어 터미널 스크롤링 효과 주거나 전체 다 보여줌 (여기서는 전체)
-            if len(bench_logs) > 15:
-                display_logs = bench_logs[-15:]
-            else:
-                display_logs = bench_logs
-                
-            bench_terminal.code("\n".join(display_logs), language="bash")
-            # 시각적 진행 효과를 위해 살짝 멈춤
-            time.sleep(0.1)
+            log_line = f"  [{current:02d}/{total}] {cat} | Domain: '{dom}' | 절감: {red:.1f}%"
+            _bench_log(log_line)
+            bench_pipeline_ph.markdown(
+                _render_bench_pipeline(BENCH_STEPS, 1, f"처리 중: {current}/{total} ('{cat}' → 도메인 '{dom}', 절감 {red:.1f}%)"),
+                unsafe_allow_html=True
+            )
+            time.sleep(0.08)
 
-        with st.spinner("규칙 기반 vs 하이브리드 A/B 실험 진행 중... (30건)"):
-            bench_logs.append("$ ./run_ab_benchmark --mode=hybrid --samples=30")
-            bench_logs.append("[SYSTEM] 벤치마크 엔진 워밍업 완료. 파이프라인 가동...")
-            bench_terminal.code("\n".join(bench_logs), language="bash")
-            
+        with st.spinner("A/B 실험 진행 중..."):
             h_runner = HybridBenchmarkRunner(model=model)
             h_report = h_runner.run(progress_callback=bench_progress_callback)
 
-            # 완료 상태 업데이트
-            progress_bar.progress(1.0)
-            status_text.markdown("**진행률**: `100%` (30/30) ✅ 벤치마크 완료!")
-            bench_logs.append("[SYSTEM] 모든 프롬프트 처리 완료. 통계 분석 중...")
-            bench_terminal.code("\n".join(bench_logs), language="bash")
+        # Step 2: 통계 분석
+        bench_pipeline_ph.markdown(_render_bench_pipeline(BENCH_STEPS, 2, "paired t-test, Wilcoxon signed-rank, Cohen's d 계산 중..."), unsafe_allow_html=True)
+        _bench_log("[STATS] 통계 검정 수행 완료")
+        time.sleep(0.5)
+
+        # Step 3: 차트 생성
+        bench_pipeline_ph.markdown(_render_bench_pipeline(BENCH_STEPS, 3, "논문용 비교 차트 렌더링 중..."), unsafe_allow_html=True)
+        _bench_log("[CHART] 비교 시각화 생성 완료")
+        time.sleep(0.4)
+
+        # Step 4: 완료
+        bench_pipeline_ph.markdown(_render_bench_pipeline(BENCH_STEPS, 5, "벤치마크 파이프라인 완료 ✅"), unsafe_allow_html=True)
+        _bench_log(f"[DONE] A/B 벤치마크 완료: {h_report.total_samples}건 처리됨")
+        _bench_log("$ exit 0")
 
         st.success(f"✅ A/B 벤치마크 완료: {h_report.total_samples}건")
 
@@ -825,7 +930,7 @@ with main_tab_model:
         #### 실험 설계
         | 항목 | 내용 |
         |------|------|
-        | **데이터셋** | 4개 카테고리, 30건 |
+        | **데이터셋** | 4개 카테고리, 60건 |
         | **카테고리** | 질문응답, 코드생성, 요약, 번역 |
         | **토크나이저** | tiktoken (o200k_base) |
         | **기준 모델** | gpt-4o-mini |
@@ -837,7 +942,7 @@ with main_tab_model:
     ```
     ┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
     │  벤치마크 데이터셋  │──▶│  최적화 파이프라인   │──▶│   정량적 평가      │──▶│   결과 보고서      │
-    │  (30건, 4카테고리) │    │  (5단계 처리)      │    │  (통계 분석)       │    │  (차트+CSV+JSON)  │
+    │  (60건, 4카테고리) │    │  (5단계 처리)      │    │  (통계 분석)       │    │  (차트+CSV+JSON)  │
     └─────────────────┘    └──────────────────┘    └──────────────────┘    └──────────────────┘
            │                                              │
            ▼                                              ▼
@@ -916,14 +1021,14 @@ with main_tab_model:
 with main_tab2:
     st.markdown("""
     ### 📊 벤치마크 실험 — 논문용 결과 분석
-    내장된 벤치마크 데이터셋(4개 카테고리, 30건)에 대해 체계적 실험을 수행하고,
+    내장된 벤치마크 데이터셋(4개 카테고리, 60건)에 대해 체계적 실험을 수행하고,
     **캡스톤 논문에 실을 수 있는 수준**의 통계 분석 및 차트를 생성합니다.
     """)
 
     st.info(f"📌 **데이터셋 구성**: {', '.join(f'{k}({len(v)}건)' for k, v in BENCHMARK_DATASET.items())} — 총 {sum(len(v) for v in BENCHMARK_DATASET.values())}건")
 
     if st.button("🧪 벤치마크 실험 실행", type="primary", use_container_width=True, key="bench"):
-        with st.spinner("실험 진행 중... (30건의 프롬프트 분석)"):
+        with st.spinner("실험 진행 중... (60건의 프롬프트 분석)"):
             runner = BenchmarkRunner(model=model)
             report = runner.run()
 
