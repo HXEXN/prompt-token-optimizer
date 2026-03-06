@@ -285,8 +285,46 @@ with main_tab_hybrid:
         if not hybrid_input.strip():
             st.warning("프롬프트를 입력해 주세요.")
         else:
-            with st.spinner("Fine-tuning 프로파일 적용 + RAG 유사 사례 검색 중..."):
+            # ── 터미널 UI 구현 ──
+            st.markdown("### 🖥️ 실시간 통합 엔진 실행 로그")
+            terminal_placeholder = st.empty()
+            logs = []
+
+            def _log(msg):
+                import time
+                logs.append(msg)
+                terminal_placeholder.code("\n".join(logs), language="bash")
+                time.sleep(0.35)
+
+            # 실행 시작 로깅
+            _log("$ ./hybrid_optimizer --run-pipeline")
+            _log("[SYSTEM] 통합 최적화 엔진 초기화...")
+            _log(f"[INFO] 입력 프롬프트 수신 (길이: {len(hybrid_input)}자)")
+
+            with st.spinner("파이프라인 엔진 가동 중..."):
+                _log("[CORE] HybridOptimizer.optimize() 호출 중...")
                 h_result = hybrid_engine.optimize(hybrid_input, top_k=3)
+
+            # 세부 스텝 로깅
+            _log(f"[FINE-TUNING] 도메인 판별 완료: '{h_result.detected_domain}' (신뢰도 {h_result.domain_confidence:.0%})")
+            
+            if h_result.learned_patterns_applied:
+                _log(f"[FINE-TUNING] 도메인 특화 학습 패턴 선제 적용 ({len(h_result.learned_patterns_applied)}개)...")
+                for pat in h_result.learned_patterns_applied:
+                    _log(f"  ↳ {pat['rule']}")
+            else:
+                _log("[FINE-TUNING] 적용 가능한 도메인 특화 패턴 없음.")
+
+            similar_count = len(h_result.rag_advice.similar_cases)
+            _log(f"[RAG] 벡터 DB 검색 완료: 유사 사례 {similar_count}건 발견")
+            if similar_count > 0:
+                _log(f"[RAG] 과거 성공 사례 조언 추출 (예상 절감: {h_result.rag_advice.predicted_reduction_rate:.1%})")
+
+            _log("[BASE-REFINER] 46개 한국어 기본 정제 규칙 가동...")
+            
+            _log(f"[RESULT] 압축 완료! (원본 {h_result.original_tokens}토큰 → 최종 {h_result.hybrid_tokens}토큰)")
+            _log(f"[RESULT] 총 토큰 절감률: {h_result.hybrid_reduction * 100:.1f}%")
+            _log("$ 프로세스 종료 (exit 0)")
 
             # ── 전략 설명 ──
             st.divider()

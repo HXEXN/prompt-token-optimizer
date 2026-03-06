@@ -183,24 +183,26 @@ class HybridOptimizer:
         # RAG와 Fine-tuning의 추천을 결합하여 최적 규칙 세트 결정
         fix_settings = self._decide_rules(profile, rag_patterns, rag_advice)
 
-        # ── Step 5: 하이브리드 최적화 실행 ──
+        # ── Step 5: 학습 패턴 적용 (하이브리드 차별화) ──
+        # 도메인 특화 학습 패턴을 원본 텍스트에 먼저 적용하여 
+        # 불필요하게 장황한 문맥을 도메인 지식으로 걷어낸다 (기존 규칙에 의해 훼손되기 전).
+        hybrid_text = text
+        learned_applied = []
+        if self._initialized:
+            hybrid_text, learned_applied = apply_learned_patterns(
+                hybrid_text, domain
+            )
+
+        # ── Step 5.5: 기본 규칙 최적화 실행 ──
         hybrid_result = self.refiner.refine(
-            text,
+            hybrid_text,
             fix_whitespace=fix_settings["fix_whitespace"],
             fix_polite=fix_settings["fix_polite"],
             fix_fillers=fix_settings["fix_fillers"],
             fix_repetitive=fix_settings["fix_repetitive"],
             fix_unnecessary=fix_settings["fix_unnecessary"],
         )
-
-        # ── Step 5.5: 학습 패턴 적용 (하이브리드 차별화) ──
-        # 기존 규칙 정제 결과에 도메인 특화 학습 패턴을 추가 적용
         hybrid_text = hybrid_result.refined
-        learned_applied = []
-        if self._initialized:
-            hybrid_text, learned_applied = apply_learned_patterns(
-                hybrid_text, domain
-            )
 
         # ── Step 6: 결과 비교 ──
         # 학습 패턴 적용 후 토큰 수 재계산
