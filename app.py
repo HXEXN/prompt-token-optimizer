@@ -452,9 +452,54 @@ with main_tab_hybrid:
     """)
 
     if st.button("🧪 A/B 벤치마크 실행 (30건 전수 비교)", type="primary", use_container_width=True, key="hybrid_bench"):
+        # UI Placeholder 설정
+        st.markdown("### ⚙️ 벤치마크 파이프라인 진행 상태")
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        st.markdown("#### 🖥️ 실시간 벤치마크 로그")
+        bench_terminal = st.empty()
+        bench_logs = []
+
+        def bench_progress_callback(current, total, info):
+            import time
+            
+            # 진행률 업데이트 (Flowchart 텍스트 효과)
+            percent = int((current / total) * 100)
+            progress_bar.progress(current / total)
+            status_text.markdown(f"**진행률**: `{percent}%` ({current}/{total}) ⏳ 데이터 처리 중...")
+
+            # 터미널 로그 추가
+            cat = info['category']
+            dom = info['domain']
+            red = info['reduction'] * 100
+            
+            log_line = f"[{current:02d}/{total}] Domain: '{dom}' | Category: '{cat}' | Reduction: {red:.1f}%"
+            bench_logs.append(log_line)
+            
+            # 최근 10개 로그만 보여주어 터미널 스크롤링 효과 주거나 전체 다 보여줌 (여기서는 전체)
+            if len(bench_logs) > 15:
+                display_logs = bench_logs[-15:]
+            else:
+                display_logs = bench_logs
+                
+            bench_terminal.code("\n".join(display_logs), language="bash")
+            # 시각적 진행 효과를 위해 살짝 멈춤
+            time.sleep(0.1)
+
         with st.spinner("규칙 기반 vs 하이브리드 A/B 실험 진행 중... (30건)"):
+            bench_logs.append("$ ./run_ab_benchmark --mode=hybrid --samples=30")
+            bench_logs.append("[SYSTEM] 벤치마크 엔진 워밍업 완료. 파이프라인 가동...")
+            bench_terminal.code("\n".join(bench_logs), language="bash")
+            
             h_runner = HybridBenchmarkRunner(model=model)
-            h_report = h_runner.run()
+            h_report = h_runner.run(progress_callback=bench_progress_callback)
+
+            # 완료 상태 업데이트
+            progress_bar.progress(1.0)
+            status_text.markdown("**진행률**: `100%` (30/30) ✅ 벤치마크 완료!")
+            bench_logs.append("[SYSTEM] 모든 프롬프트 처리 완료. 통계 분석 중...")
+            bench_terminal.code("\n".join(bench_logs), language="bash")
 
         st.success(f"✅ A/B 벤치마크 완료: {h_report.total_samples}건")
 

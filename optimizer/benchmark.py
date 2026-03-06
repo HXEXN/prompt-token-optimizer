@@ -367,12 +367,13 @@ class HybridBenchmarkRunner:
         self.counter = TokenCounter(model=model)
         self.refiner = PromptRefiner(model=model)
 
-    def run(self, dataset: dict[str, list[str]] | None = None) -> HybridBenchmarkReport:
+    def run(self, dataset: dict[str, list[str]] | None = None, progress_callback=None) -> HybridBenchmarkReport:
         """
         A/B 비교 벤치마크를 실행한다.
 
         Args:
             dataset: 데이터셋 (None이면 기본 BENCHMARK_DATASET 사용)
+            progress_callback: UI 업데이트용 콜백 함수, 인자 (current, total, result_info)
 
         Returns:
             HybridBenchmarkReport
@@ -389,6 +390,8 @@ class HybridBenchmarkRunner:
         results = []
         prompt_id = 0
 
+        total_prompts = sum(len(p) for p in dataset.values())
+
         for category, prompts in dataset.items():
             for prompt in prompts:
                 prompt_id += 1
@@ -400,7 +403,7 @@ class HybridBenchmarkRunner:
                 # 하이브리드
                 h_result = engine.optimize(prompt, top_k=3)
 
-                results.append(HybridExperimentResult(
+                res = HybridExperimentResult(
                     category=category,
                     prompt_id=prompt_id,
                     original_tokens=original_tokens,
@@ -416,7 +419,17 @@ class HybridBenchmarkRunner:
                     ),
                     detected_domain=h_result.detected_domain,
                     learned_patterns_count=len(h_result.learned_patterns_applied),
-                ))
+                )
+                results.append(res)
+                
+                if progress_callback:
+                    progress_callback(prompt_id, total_prompts, {
+                        "category": category,
+                        "original_tokens": original_tokens,
+                        "hybrid_tokens": h_result.hybrid_tokens,
+                        "reduction": h_result.hybrid_reduction,
+                        "domain": h_result.detected_domain
+                    })
 
         # 카테고리별 통계
         cat_stats = self._compute_category_stats(results)
