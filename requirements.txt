@@ -5,3 +5,9 @@ matplotlib>=3.7.0
 pytest>=7.4.0
 scikit-learn>=1.3.0
 scipy>=1.11.0
+# AI/ML
+sentence-transformers>=2.5.1
+torch>=2.0.0
+g4f
+curl_cffi
+aiohttp

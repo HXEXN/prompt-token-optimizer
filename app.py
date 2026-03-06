@@ -81,7 +81,11 @@ with st.sidebar:
     model = st.selectbox("모델 선택", options=list(MODEL_PRICING.keys()), index=1)
 
     st.divider()
-    st.subheader("🔧 정제 규칙")
+    st.subheader("🔑 API 설정")
+    st.info("현재 무료 LLM (g4f) 백엔드를 사용 중입니다. 별도의 API 키가 필요하지 않습니다.")
+        
+    st.divider()
+    st.subheader("🔧 규칙 기반 설정 (기본)")
     fix_whitespace = st.checkbox("중복 공백/줄바꿈 정리", value=True)
     fix_polite = st.checkbox("과잉 공손 표현 제거", value=True)
     fix_fillers = st.checkbox("불필요 접속사/수식어 제거", value=True)

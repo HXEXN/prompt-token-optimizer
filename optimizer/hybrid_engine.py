@@ -179,33 +179,38 @@ class HybridOptimizer:
                     f"도메인 '{domain}' 감지 (신뢰도 {domain_confidence:.0%})"
                 )
 
-        # ── Step 4: 통합 의사결정 ──
-        # RAG와 Fine-tuning의 추천을 결합하여 최적 규칙 세트 결정
-        fix_settings = self._decide_rules(profile, rag_patterns, rag_advice)
+        # ── Step 4: 통합 의사결정 (규칙 적용 대신 LLM 호출 준비) ──
+        # RAG 검색 결과에서 텍스트 쌍을 추출하여 LLM에 Few-Shot으로 제공
+        rag_examples = []
+        if rag_similar:
+            # 상위 2개 정도만 컨텍스트로 사용 (토큰 절약 및 너무 긴 프롬프트 방지)
+            for case in rag_similar[:2]:
+                rag_examples.append({
+                    "original": case.entry.original_text,
+                    "refined": case.entry.refined_text
+                })
 
-        # ── Step 5: 학습 패턴 적용 (하이브리드 차별화) ──
-        # 도메인 특화 학습 패턴을 원본 텍스트에 먼저 적용하여 
-        # 불필요하게 장황한 문맥을 도메인 지식으로 걷어낸다 (기존 규칙에 의해 훼손되기 전).
+        # ── Step 5: LLM 기반 하이브리드 최적화 (실제 생성) ──
         hybrid_text = text
-        learned_applied = []
+        learned_applied = [] # LLM 생성 방식으로 변경되어 더 이상 사용되지 않음
+        
         if self._initialized:
-            hybrid_text, learned_applied = apply_learned_patterns(
-                hybrid_text, domain
-            )
-
-        # ── Step 5.5: 기본 규칙 최적화 실행 ──
-        hybrid_result = self.refiner.refine(
-            hybrid_text,
-            fix_whitespace=fix_settings["fix_whitespace"],
-            fix_polite=fix_settings["fix_polite"],
-            fix_fillers=fix_settings["fix_fillers"],
-            fix_repetitive=fix_settings["fix_repetitive"],
-            fix_unnecessary=fix_settings["fix_unnecessary"],
-        )
-        hybrid_text = hybrid_result.refined
+            try:
+                from optimizer.llm_client import LLMOptimizerClient
+                
+                # g4f를 사용하므로 API Key 불필요
+                llm_client = LLMOptimizerClient(model=self.model)
+                hybrid_text = llm_client.optimize_prompt(
+                    target_prompt=text,
+                    domain=domain,
+                    rag_examples=rag_examples
+                )
+            except Exception as e:
+                ft_contribution += f" (LLM 에러: {str(e)}. 규칙 기반으로 폴백)"
+                hybrid_text = rule_based.refined
 
         # ── Step 6: 결과 비교 ──
-        # 학습 패턴 적용 후 토큰 수 재계산
+        # LLM 최적화 후 토큰 수 재계산
         hybrid_tokens = self.counter.count(hybrid_text)
         hybrid_reduction = (
             1 - hybrid_tokens / original_tokens
@@ -216,14 +221,13 @@ class HybridOptimizer:
             hybrid_reduction - rule_based.reduction_rate
         ) if hybrid_reduction > rule_based.reduction_rate else 0.0
 
-        # 실제로 하이브리드가 더 나을 때만 사용
+        # LLM이 오히려 글을 늘리거나 퀄리티가 현저히 떨어지는 경우 대비 방어 로직
         if hybrid_tokens > rule_based.refined_tokens:
             hybrid_text = rule_based.refined
             hybrid_tokens = rule_based.refined_tokens
             hybrid_reduction = rule_based.reduction_rate
             additional_savings = 0
             improvement_rate = 0.0
-            learned_applied = []
 
         # 비용 계산
         cost_rule = self.calculator.calculate_cost(rule_based.refined_tokens)
@@ -231,8 +235,8 @@ class HybridOptimizer:
 
         # 전략 설명
         strategy = self._build_strategy_explanation(
-            domain, domain_confidence, rag_advice, fix_settings,
-            len(learned_applied),
+            domain, domain_confidence, rag_advice, {},
+            0,
         )
 
         return HybridResult(

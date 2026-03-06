@@ -56,15 +56,21 @@ class OptimizationAdvice:
 class PromptKnowledgeBase:
     """
     벤치마크 데이터를 지식 베이스로 구축.
-    RAG의 'R' (Retrieval) 기반이 되는 인덱스.
+    RAG의 'R' (Retrieval) 기반이 되는 Dense Vector 인덱스.
     """
 
     def __init__(self, model: str = "gpt-4o-mini"):
         self.counter = TokenCounter(model=model)
         self.refiner = PromptRefiner(model=model)
         self.entries: list[KnowledgeEntry] = []
-        self._idf: dict[str, float] = {}
         self._built = False
+        
+        # Sentence Transformer 로드 (처음 호출 시 다운로드 발생)
+        try:
+            from sentence_transformers import SentenceTransformer
+            self.embedder = SentenceTransformer('all-MiniLM-L6-v2')
+        except ImportError:
+            raise ImportError("sentence-transformers 패키지가 설치되지 않았습니다.")
 
     def build(self, dataset: dict[str, list[str]]):
         """
@@ -72,6 +78,7 @@ class PromptKnowledgeBase:
         """
         self.entries = []
         entry_id = 0
+        texts_to_embed = []
 
         for category, prompts in dataset.items():
             for prompt in prompts:
@@ -95,10 +102,17 @@ class PromptKnowledgeBase:
                     applied_rules=list(set(rules)),
                 )
                 self.entries.append(entry)
+                texts_to_embed.append(prompt)
                 entry_id += 1
 
-        # TF-IDF 인덱스 구축
-        self._build_tfidf_index()
+        # 배치 임베딩 벡터 생성
+        import numpy as np
+        embeddings = self.embedder.encode(texts_to_embed, convert_to_numpy=True)
+        
+        for i, entry in enumerate(self.entries):
+            # tfidf_vector 필드 이름을 편의상 재사용하지만 실제로는 numpy array
+            entry.tfidf_vector = embeddings[i]
+
         self._built = True
 
     @property
@@ -109,85 +123,34 @@ class PromptKnowledgeBase:
     def size(self) -> int:
         return len(self.entries)
 
-    def _tokenize_text(self, text: str) -> list[str]:
-        """텍스트를 단어 단위로 분리한다."""
-        # 한국어 + 영어를 모두 처리
-        # 특수 문자 제거, 공백 분리
-        cleaned = re.sub(r'[^\w\s가-힣a-zA-Z]', ' ', text)
-        words = cleaned.split()
-        # 1글자 제거 (조사 등 불용어 제거 효과)
-        return [w for w in words if len(w) > 1]
-
-    def _compute_tf(self, words: list[str]) -> dict[str, float]:
-        """TF(Term Frequency) 계산"""
-        counter = Counter(words)
-        total = len(words) if words else 1
-        return {word: count / total for word, count in counter.items()}
-
-    def _build_tfidf_index(self):
-        """TF-IDF 인덱스를 구축한다."""
-        # 1. 모든 문서에서 단어 추출
-        doc_words = []
-        for entry in self.entries:
-            words = self._tokenize_text(entry.original_text)
-            doc_words.append(words)
-
-        # 2. IDF 계산
-        n_docs = len(doc_words)
-        word_doc_count: dict[str, int] = {}
-        for words in doc_words:
-            unique_words = set(words)
-            for w in unique_words:
-                word_doc_count[w] = word_doc_count.get(w, 0) + 1
-
-        self._idf = {}
-        for word, doc_count in word_doc_count.items():
-            self._idf[word] = math.log((n_docs + 1) / (doc_count + 1)) + 1
-
-        # 3. 각 항목에 TF-IDF 벡터 저장
-        for entry, words in zip(self.entries, doc_words):
-            tf = self._compute_tf(words)
-            tfidf = {}
-            for word, tf_val in tf.items():
-                tfidf[word] = tf_val * self._idf.get(word, 1.0)
-            entry.tfidf_vector = tfidf
-
-    def get_tfidf_vector(self, text: str) -> dict[str, float]:
-        """텍스트의 TF-IDF 벡터를 계산한다."""
-        words = self._tokenize_text(text)
-        tf = self._compute_tf(words)
-        tfidf = {}
-        for word, tf_val in tf.items():
-            tfidf[word] = tf_val * self._idf.get(word, 1.0)
-        return tfidf
+    def get_embedding_vector(self, text: str):
+        """텍스트의 Dense 임베딩 벡터를 계산한다."""
+        return self.embedder.encode([text], convert_to_numpy=True)[0]
 
 
 class SimilaritySearcher:
     """
     유사 사례 검색 — RAG의 핵심 'Retrieval' 엔진
-    TF-IDF 코사인 유사도 기반으로 가장 유사한 프롬프트를 찾는다.
+    Dense 임베딩 유사도 기반으로 가장 유사한 프롬프트를 찾는다.
     """
 
     def __init__(self, knowledge_base: PromptKnowledgeBase):
         self.kb = knowledge_base
 
     @staticmethod
-    def _cosine_similarity(vec_a: dict[str, float], vec_b: dict[str, float]) -> float:
-        """두 TF-IDF 벡터 간 코사인 유사도를 계산한다."""
-        # 공통 키
-        common_keys = set(vec_a.keys()) & set(vec_b.keys())
-        if not common_keys:
-            return 0.0
-
-        dot_product = sum(vec_a[k] * vec_b[k] for k in common_keys)
-
-        norm_a = math.sqrt(sum(v ** 2 for v in vec_a.values()))
-        norm_b = math.sqrt(sum(v ** 2 for v in vec_b.values()))
+    def _cosine_similarity(vec_a, vec_b) -> float:
+        """두 Dense 벡터 간 코사인 유사도를 계산한다."""
+        import numpy as np
+        
+        # sentence-transformers는 기본적으로 정규화된 L2 벡터를 반환하지만,
+        # 안전을 위해 일반 코사인 유사도 식을 적용한다.
+        norm_a = np.linalg.norm(vec_a)
+        norm_b = np.linalg.norm(vec_b)
 
         if norm_a == 0 or norm_b == 0:
             return 0.0
 
-        return dot_product / (norm_a * norm_b)
+        return float(np.dot(vec_a, vec_b) / (norm_a * norm_b))
 
     def search(self, query_text: str, top_k: int = 3) -> list[SearchResult]:
         """
@@ -203,8 +166,8 @@ class SimilaritySearcher:
         if not self.kb.is_built:
             return []
 
-        query_vector = self.kb.get_tfidf_vector(query_text)
-        if not query_vector:
+        query_vector = self.kb.get_embedding_vector(query_text)
+        if query_vector is None or len(query_vector) == 0:
             return []
 
         scored = []
